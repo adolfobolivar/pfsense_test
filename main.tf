@@ -284,7 +284,18 @@ resource "aws_eip" "pfsense_eip" {
   }
 }
 
-# 10. Ubuntu Server (private, LAN subnet)
+# 10. Elastic IP – reserved for IPsec encryption domain (Twilio Interconnect)
+# Not attached to any instance or ENI; used as the encryption domain address
+# in the policy-based VPN configuration on the Twilio side.
+resource "aws_eip" "ipsec_encryption_domain_eip" {
+  domain = "vpc"
+  tags = {
+    Name    = "ipsec-encryption-domain-eip"
+    Network = "VPN"
+  }
+}
+
+# 11. Ubuntu Server (private, LAN subnet)
 # depends_on ensures:
 #   - pfSense is fully created and its LAN ENI is attached before Ubuntu boots
 #   - LAN route table is associated with the LAN subnet so the default gateway

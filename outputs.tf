@@ -37,3 +37,8 @@ output "ssh_ubuntu_via_pfsense" {
   description = "SSH command to reach the Ubuntu server through pfSense as a jump host"
   value       = "ssh -i ${local_sensitive_file.pfsense_pem.filename} -J admin@${aws_eip.pfsense_eip.public_ip} ubuntu@${aws_instance.ubuntu.private_ip}"
 }
+
+output "ipsec_encryption_domain_ip" {
+  description = "Reserved EIP for IPsec encryption domain (Twilio Interconnect policy-based VPN)"
+  value       = aws_eip.ipsec_encryption_domain_eip.public_ip
+}

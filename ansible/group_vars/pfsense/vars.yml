@@ -1,0 +1,18 @@
+---
+# Connection settings
+ansible_user: admin
+ansible_connection: ssh
+ansible_python_interpreter: /usr/local/bin/python3
+
+# pfSense API / XMLRPC credentials
+pfsense_user: admin
+pfsense_password: "pfsense"  # Change after first login
+
+# pfSense host details
+pfsense_host: "YOUR_PFSENSE_PUBLIC_IP"  # Set to the EIP from terraform output pfsense_public_ip
+
+# WAN interface
+wan_interface: em0
+
+# LAN CIDR (for future LAN interface if added)
+lan_cidr: "192.168.1.0/24"

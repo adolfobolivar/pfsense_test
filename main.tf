@@ -141,19 +141,25 @@ resource "aws_security_group" "pfsense_wan_sg" {
     protocol    = "udp"
     cidr_blocks = ["0.0.0.0/0"]
   }
-  ingress {
-    description = "SSH management"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [local.config.admin_ip]
+  dynamic "ingress" {
+    for_each = local.config.admin_ip_ranges
+    content {
+      description = "SSH management"
+      from_port   = 22
+      to_port     = 22
+      protocol    = "tcp"
+      cidr_blocks = [ingress.value]
+    }
   }
-  ingress {
-    description = "HTTPS management"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = [local.config.admin_ip]
+  dynamic "ingress" {
+    for_each = local.config.admin_ip_ranges
+    content {
+      description = "HTTPS management"
+      from_port   = 443
+      to_port     = 443
+      protocol    = "tcp"
+      cidr_blocks = [ingress.value]
+    }
   }
   egress {
     from_port   = 0

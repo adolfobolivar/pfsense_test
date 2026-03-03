@@ -101,20 +101,20 @@ cp config.yaml.example config.yaml
 
 Edit `admin_ip` to your actual public IP (`curl -s https://checkip.amazonaws.com`).
 
-| Key | Default | Description |
-|---|---|---|
-| `aws_region` | `us-east-1` | AWS region |
-| `availability_zone` | `us-east-1a` | AZ for both subnets |
-| `vpc_cidr` | `172.31.0.0/16` | VPC CIDR block |
-| `wan_subnet_cidr` | `172.31.0.0/20` | WAN (public) subnet |
-| `lan_subnet_cidr` | `172.31.254.0/24` | LAN (private) subnet |
-| `pfsense_lan_ip` | `172.31.254.10` | Static IP for the pfSense LAN ENI (`.1`–`.3` are reserved by AWS) |
-| `ubuntu_private_ip` | `172.31.254.20` | Static IP for the Ubuntu server |
-| `ami_id` | `ami-0dcd87fd64421d7e1` | pfSense Plus EC2 25.11.1 (us-east-1) |
-| `ubuntu_ami_id` | `ami-0e2c8caa4b6378d8c` | Ubuntu 24.04 LTS (us-east-1) |
-| `instance_type` | `t3.small` | EC2 instance type for both instances |
-| `key_name` | `pfsense-key` | Name of the EC2 Key Pair to create |
-| `admin_ip` | `YOUR_PUBLIC_IP/32` | Your public IP — restrict SSH/HTTPS access to pfSense |
+| Key                 | Default                 | Description                                                       |
+|---------------------|-------------------------|-------------------------------------------------------------------|
+| `aws_region`        | `us-east-1`             | AWS region                                                        |
+| `availability_zone` | `us-east-1a`            | AZ for both subnets                                               |
+| `vpc_cidr`          | `172.31.0.0/16`         | VPC CIDR block                                                    |
+| `wan_subnet_cidr`   | `172.31.0.0/20`         | WAN (public) subnet                                               |
+| `lan_subnet_cidr`   | `172.31.254.0/24`       | LAN (private) subnet                                              |
+| `pfsense_lan_ip`    | `172.31.254.10`         | Static IP for the pfSense LAN ENI (`.1`–`.3` are reserved by AWS) |
+| `ubuntu_private_ip` | `172.31.254.20`         | Static IP for the Ubuntu server                                   |
+| `ami_id`            | `ami-0dcd87fd64421d7e1` | pfSense Plus EC2 25.11.1 (us-east-1)                              |
+| `ubuntu_ami_id`     | `ami-0e2c8caa4b6378d8c` | Ubuntu 24.04 LTS (us-east-1)                                      |
+| `instance_type`     | `t3.small`              | EC2 instance type for both instances                              |
+| `key_name`          | `pfsense-key`           | Name of the EC2 Key Pair to create                                |
+| `admin_ip_ranges`   | []                      | Restrict SSH/HTTPS access to pfSense to those CIDRs               |
 
 ### `secrets.yaml`
 

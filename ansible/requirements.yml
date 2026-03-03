@@ -1,0 +1,6 @@
+---
+collections:
+  - name: pfsensible.core
+    version: ">=0.6.0"
+
+roles: []

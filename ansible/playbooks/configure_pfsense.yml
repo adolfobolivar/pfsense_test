@@ -1,0 +1,65 @@
+---
+- name: Configure pfSense Firewall
+  hosts: pfsense
+  gather_facts: false
+
+  collections:
+    - pfsensible.core
+
+  tasks:
+    # ── 1. Validate connectivity ───────────────────────────────────────────────
+    - name: Wait for pfSense SSH to be reachable
+      ansible.builtin.wait_for_connection:
+        timeout: 120
+
+    # ── 2. Aliases ────────────────────────────────────────────────────────────
+    - name: Create admin host alias
+      pfsense_alias:
+        name: admin_host
+        type: host
+        address: "{{ pfsense_host }}"
+        descr: "Terraform admin IP"
+        state: present
+
+    # ── 3. Firewall rules ─────────────────────────────────────────────────────
+    - name: Allow IPsec IKE (UDP 500) on WAN
+      pfsense_rule:
+        name: "Allow IPsec IKE"
+        action: pass
+        interface: "{{ wan_interface }}"
+        protocol: udp
+        destination_port: 500
+        state: present
+
+    - name: Allow IPsec NAT-T (UDP 4500) on WAN
+      pfsense_rule:
+        name: "Allow IPsec NAT-T"
+        action: pass
+        interface: "{{ wan_interface }}"
+        protocol: udp
+        destination_port: 4500
+        state: present
+
+    - name: Allow SSH from admin host only
+      pfsense_rule:
+        name: "Allow SSH admin"
+        action: pass
+        interface: "{{ wan_interface }}"
+        protocol: tcp
+        source: admin_host
+        destination_port: 22
+        state: present
+
+    - name: Block all other WAN inbound traffic
+      pfsense_rule:
+        name: "Block WAN default"
+        action: block
+        interface: "{{ wan_interface }}"
+        protocol: any
+        state: present
+
+    # ── 4. SSH hardening ─────────────────────────────────────────────────────
+    - name: Disable SSH password authentication
+      pfsense_setup:
+        sshd:
+          passwordauth: false

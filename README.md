@@ -151,10 +151,82 @@ pfsense_lan_ip         = "172.31.254.10"
 ubuntu_private_ip      = "172.31.254.20"
 private_key_path       = "./pfsense-key.pem"
 ssh_pfsense            = "ssh -i ./pfsense-key.pem admin@<EIP>"
-ssh_ubuntu_via_pfsense = "ssh -i ./pfsense-key.pem -J admin@<EIP> ubuntu@172.31.254.20"
+ssh_ubuntu_via_pfsense = "ssh -i ./pfsense-key.pem -o 'ProxyCommand ssh -i ./pfsense-key.pem admin@<EIP> -W %h:%p' ubuntu@172.31.254.20"
 ```
 
-### 3. Generate the Ansible inventory
+### 3. Configure pfSense interfaces (manual, first boot only)
+
+SSH into pfSense and assign the WAN/LAN interfaces via the console menu:
+
+```bash
+ssh -i ./pfsense-key.pem admin@<EIP>
+```
+
+**Step 1 — Assign interfaces (option 1):**
+
+```
+Should VLANs be set up now [y|n]? n
+Enter the WAN interface name: ena0
+Enter the LAN interface name: ena1
+Do you want to proceed [y|n]? y
+```
+
+**Step 2 — Set LAN IP (option 2):**
+
+```
+Enter the number of the interface you wish to configure: 2
+Configure IPv4 address LAN interface via DHCP? (y/n) n
+Enter the new LAN IPv4 address: 172.31.254.10
+Enter the new LAN IPv4 subnet bit count (1 to 32): 24
+For a LAN, press <ENTER> for none:          ← upstream gateway, leave blank
+Configure IPv6 address LAN interface via DHCP6? (y/n) n
+Enter the new LAN IPv6 address:             ← leave blank
+Do you want to enable the DHCP server on LAN? (y/n) n
+Do you want to revert to HTTP as the webConfigurator protocol? (y/n) n
+```
+
+The console will confirm:
+```
+The IPv4 LAN address has been set to 172.31.254.10/24
+```
+
+### 4. Change the default admin password
+
+While still connected via SSH, open a shell (option 8) and run:
+
+```
+passwd admin
+Changing local password for admin
+New Password:
+Retype New Password:
+```
+
+### 5. Verify internet reachability from Ubuntu
+
+SSH into the Ubuntu server via the pfSense jump host:
+
+```bash
+ssh -i ./pfsense-key.pem \
+  -o "ProxyCommand ssh -i ./pfsense-key.pem admin@<EIP> -W %h:%p" \
+  ubuntu@172.31.254.20
+```
+
+Then test routing and NAT:
+
+```bash
+ping -c 3 8.8.8.8                      # raw IP routing through pfSense
+curl -s https://checkip.amazonaws.com  # DNS + HTTPS; should return the pfSense EIP
+```
+
+Expected output:
+```
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=114 time=1.68 ms   # ping succeeds
+<EIP>                                                      # curl returns pfSense public IP
+```
+
+Only proceed to Ansible once both tests pass.
+
+### 6. Generate the Ansible inventory
 
 ```bash
 ./generate_inventory.sh
@@ -162,14 +234,14 @@ ssh_ubuntu_via_pfsense = "ssh -i ./pfsense-key.pem -J admin@<EIP> ubuntu@172.31.
 
 This reads the `pfsense_public_ip` Terraform output and writes `ansible/inventory.ini`.
 
-### 4. Install Ansible collections
+### 7. Install Ansible collections
 
 ```bash
 cd ansible
 ansible-galaxy collection install -r requirements.yml
 ```
 
-### 5. Run the Ansible playbook
+### 8. Run the Ansible playbook
 
 ```bash
 ansible-playbook playbooks/configure_pfsense.yml
@@ -192,7 +264,11 @@ ssh -i ./pfsense-key.pem admin@<EIP>
 
 **Ubuntu server (LAN, via pfSense jump host):**
 ```bash
-ssh -i ./pfsense-key.pem -J admin@<EIP> ubuntu@172.31.254.20
+# The -J shorthand does not forward the identity file to the jump host;
+# use ProxyCommand to supply the key for both hops.
+ssh -i ./pfsense-key.pem \
+  -o "ProxyCommand ssh -i ./pfsense-key.pem admin@<EIP> -W %h:%p" \
+  ubuntu@172.31.254.20
 ```
 
 Both commands are also printed as Terraform outputs after `apply`.
@@ -215,4 +291,4 @@ terraform destroy
 - The LAN route table sends all egress traffic (`0.0.0.0/0`) through the **pfSense LAN ENI**, making pfSense the default gateway for every host in the LAN subnet.
 - The Ubuntu instance has **no public IP** and is not reachable from the internet directly.
 - Update `admin_ip` in `config.yaml` to your actual public IP before deploying to avoid locking yourself out.
-- The default pfSense admin password (`pfsense`) should be changed immediately after first login.
+- The default pfSense admin password (`pfsense`) must be changed immediately after first login — see step 4 above.

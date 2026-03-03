@@ -246,7 +246,9 @@ resource "aws_instance" "pfsense" {
   instance_type = local.config.instance_type
   key_name      = aws_key_pair.pfsense_key.key_name
 
-  # Attach pre-created ENIs; source_dest_check is set on the ENIs themselves
+  # Attach pre-created ENIs; source_dest_check is set on the ENIs themselves.
+  # network_interface blocks are deprecated but remain the only way to attach
+  # pre-created ENIs at launch time (primary_network_interface_id is read-only).
   network_interface {
     device_index         = 0
     network_interface_id = aws_network_interface.pfsense_wan_eni.id

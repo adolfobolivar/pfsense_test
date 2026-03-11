@@ -1,6 +1,14 @@
-# pfSense Firewall on AWS
+# pfSense Firewall on AWS — Twilio Interconnect VPN
 
-Terraform project that deploys a **pfSense Plus firewall** on AWS with a dual-NIC (WAN + LAN) architecture. A private Ubuntu server sits behind the firewall on the LAN subnet, using pfSense as its default gateway. An Ansible playbook handles post-deploy pfSense configuration, including a **split-tunnel IPsec VPN to Twilio** with NAT/BINAT.
+Terraform + Ansible project that deploys a **pfSense Plus firewall** on AWS and connects it to the **[Twilio Interconnect](https://www.twilio.com/docs/interconnect)** service via a **policy-based IPsec VPN**.
+
+Twilio Interconnect provides a private, dedicated network path between your infrastructure and Twilio's platform, bypassing the public internet for voice and messaging traffic. This project automates the AWS infrastructure and pfSense configuration required to establish that connection.
+
+**What this project does:**
+- Deploys a pfSense Plus firewall on AWS with a dual-NIC (WAN + LAN) architecture
+- Places a private Ubuntu server behind the firewall on the LAN subnet
+- Configures a **split-tunnel IKEv1 IPsec VPN** to the Twilio Interconnect peer with NAT/BINAT so Twilio sees a single registered public IP (`ipsec_encryption_domain_ip`) as the traffic source
+- Only routes Twilio service prefixes through the tunnel — all other traffic continues via the internet
 
 ---
 

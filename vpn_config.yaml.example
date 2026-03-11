@@ -14,7 +14,7 @@ vpn:
     ike_version:           "ikev1"                   # ikev1 | ikev2
     mode:                  "main"                    # main | aggressive
     auth_method:           "pre_shared_key"
-    encryption_algorithm:  "aes"                  # aes | aes128gcm | aes256gcm | 3des | cast128
+    encryption_algorithm:  "aes"                  # aes | aes128gcm | aes192gcm | aes256gcm | blowfish | 3des | cast128
     encryption_key_length: 128                   # 128 | 192 | 256 (only for aes)
     auth_algorithm:        "sha1"                    # sha1 | sha256 | sha384 …
     dh_group:              2                         # 2 | 5 | 14 | 19 …
@@ -26,7 +26,7 @@ vpn:
 
   # ── Phase 2 ────────────────────────────────────────────────────────────────
   phase2:
-    encryption_algorithm:  "aes"            # aes | aes128gcm | aes256gcm | 3des
+    encryption_algorithm:  "aes"            # aes | aes128gcm | aes192gcm | aes256gcm | blowfish | 3des | cast128
     encryption_key_length: 128              # 128 | 192 | 256 (only for aes)
     auth_algorithm:        "hmac_sha1_96"            # hmac_sha1_96 | hmac_sha256_128 …
     pfs_group:             2                         # 0 = PFS disabled

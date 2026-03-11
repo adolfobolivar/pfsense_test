@@ -123,6 +123,9 @@
         mode:                   "{{ vpn.phase1.mode }}"
         lifetime:               "{{ vpn.phase1.lifetime }}"
         nat_traversal:          "{{ vpn.phase1.nat_traversal }}"
+        myid_type:              address
+        myid_data:              "{{ pfsense_host }}"
+        peerid_type:            peeraddress
         enable_dpd:             "{{ vpn.phase1.enable_dpd }}"
         dpd_delay:              "{{ vpn.phase1.dpd_delay }}"
         dpd_maxfail:            "{{ vpn.phase1.dpd_maxfail }}"
@@ -148,10 +151,10 @@
         descr:    "{{ item.description }}"
         p1_descr: "{{ vpn_tunnel_description }}"
         mode:     tunnel
-        # Local selector: single host (/32) — Ubuntu LAN IP
-        local:    "{{ vpn.phase2.local_host_ip }}/32"
-        # NAT/BINAT: translate source to the pfSense Elastic IP
-        nat:      "{{ vpn.phase2.nat_binat_ip }}/32"
+        # Local selector: single host (address type) — Ubuntu LAN IP
+        local:    "{{ vpn.phase2.local_host_ip }}"
+        # NAT/BINAT: translate source to the pfSense Elastic IP (address type)
+        nat:      "{{ vpn.phase2.nat_binat_ip }}"
         remote:   "{{ item.network }}"
         protocol: esp
         aes:      true

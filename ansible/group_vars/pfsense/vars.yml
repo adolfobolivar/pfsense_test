@@ -7,7 +7,7 @@ ansible_user: admin
 ansible_python_interpreter: /usr/local/bin/python3.11
 
 # pfSense host — set to the EIP from terraform output pfsense_public_ip
-pfsense_host: "YOUR_PFSENSE_PUBLIC_IP"
+pfsense_host: "44.213.240.254"
 
 # pfSense admin credentials (used by pfsensible.core modules)
 pfsense_user:     admin
@@ -21,4 +21,4 @@ lan_interface: lan
 lan_cidr: "172.31.254.0/24"
 
 # IPsec tunnel description (referenced in phase1 + phase2 tasks)
-vpn_tunnel_description: "Twilio IPsec VPN"
+vpn_tunnel_description: "Twilio VPN"

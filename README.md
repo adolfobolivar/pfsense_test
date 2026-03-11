@@ -271,6 +271,14 @@ Only proceed to Ansible once both tests pass.
 
 This reads the `pfsense_public_ip` Terraform output and writes `ansible/inventory.ini`.
 
+Then update `ansible/group_vars/pfsense/vars.yml` with the same EIP:
+
+```yaml
+pfsense_host: "<EIP>"   # must match terraform output pfsense_public_ip
+```
+
+This value is used as the **IKE ID** presented to the remote peer during Phase 1 negotiation. It must match the public IP registered with Twilio — if pfSense presents its private WAN IP (`172.31.x.x`) instead of the EIP, Phase 1 will fail with `Peer's IKE-ID validation failed`.
+
 ### 7. Install Ansible collections
 
 From the `ansible/` directory:
@@ -388,23 +396,53 @@ SSH into pfSense and open a shell (option 8):
 ```bash
 ssh -i ./pfsense-key.pem admin@<EIP>
 # Select option 8 for shell
-ipsec statusall
 ```
 
-Look for `ESTABLISHED` and `INSTALLED` in the output. Then test split routing from Ubuntu:
+> **Note:** `ipsec` is not in the default `PATH` on pfSense Plus 25.11.1. Use `swanctl` instead.
+
+Check active IKE and CHILD SAs:
+
+```bash
+swanctl --list-sas
+```
+
+Expected output when the tunnel is up:
+
+```
+con1: #1, ESTABLISHED, IKEv1, ...
+  local  '44.x.x.x' @ 172.31.x.x[500]      ← EIP presented as IKE ID
+  remote '159.183.252.2' @ 159.183.252.2[500]
+  AES_CBC-128/HMAC_SHA1_96/PRF_HMAC_SHA1/MODP_1024
+  established Xs ago, reauth in Xs
+  con1_1: #1, INSTALLED, TUNNEL, ESP:AES_CBC-128/HMAC_SHA1_96/MODP_1024
+    local  52.x.x.x/32|172.31.254.20/32    ← BINAT EIP|LAN host
+    remote 159.183.252.x/32|/0             ← Twilio service IP
+```
+
+If the tunnel is in trap mode (configured but not up), initiate it manually:
+
+```bash
+swanctl --terminate --ike con1   # clear any stale SAs
+swanctl --initiate --child con1_1
+swanctl --list-sas               # confirm ESTABLISHED + INSTALLED
+```
+
+Then test split routing from Ubuntu:
 
 ```bash
 ssh -i ./pfsense-key.pem \
   -o "ProxyCommand ssh -i ./pfsense-key.pem admin@<EIP> -W %h:%p" \
   ubuntu@172.31.254.20
 
-# Should route via VPN tunnel:
+# Should route via VPN tunnel (traffic appears as BINAT EIP to Twilio):
 ping -c 3 <TWILIO_SERVICE_IP>
 
 # Should still route via internet:
 ping -c 3 8.8.8.8
 curl -s https://checkip.amazonaws.com   # must return the pfSense EIP
 ```
+
+Packet counters on the SA (`bytes_in`/`bytes_out` incrementing) confirm traffic is flowing through the tunnel.
 
 ---
 

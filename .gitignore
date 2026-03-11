@@ -14,6 +14,10 @@ secrets.yaml
 # Copy config.yaml.example to config.yaml and fill in your values
 config.yaml
 
+# VPN config — contains Twilio peer IPs and VPN prefixes
+# Copy vpn_config.yaml.example to vpn_config.yaml and fill in your values
+vpn_config.yaml
+
 # Ansible
 ansible/collections/
 ansible/group_vars/pfsense/vault.yml

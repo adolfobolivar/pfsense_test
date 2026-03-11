@@ -1,0 +1,46 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Twilio IPsec VPN Configuration — EXAMPLE
+# Copy this file to vpn_config.yaml and fill in your environment values.
+# vpn_config.yaml is gitignored — never commit the file with real IPs.
+# Preshared key lives in secrets.yaml — also gitignored.
+# ─────────────────────────────────────────────────────────────────────────────
+
+vpn:
+  description: "Twilio IPsec VPN"
+
+  # ── Phase 1 ────────────────────────────────────────────────────────────────
+  phase1:
+    gateway:               "TWILIO_PEER_PUBLIC_IP"   # Twilio IPsec peer public IP
+    ike_version:           "ikev1"                   # ikev1 | ikev2
+    mode:                  "main"                    # main | aggressive
+    auth_method:           "pre_shared_key"
+    encryption_algorithm:  "aes"                  # aes | aes128gcm | aes256gcm | 3des | cast128
+    encryption_key_length: 128                   # 128 | 192 | 256 (only for aes)
+    auth_algorithm:        "sha1"                    # sha1 | sha256 | sha384 …
+    dh_group:              2                         # 2 | 5 | 14 | 19 …
+    lifetime:              28800                     # seconds
+    nat_traversal:         "on"                      # on | force
+    enable_dpd:            true
+    dpd_delay:             10                        # seconds between DPD probes
+    dpd_maxfail:           5                         # failures before declaring peer dead
+
+  # ── Phase 2 ────────────────────────────────────────────────────────────────
+  phase2:
+    encryption_algorithm:  "aes"            # aes | aes128gcm | aes256gcm | 3des
+    encryption_key_length: 128              # 128 | 192 | 256 (only for aes)
+    auth_algorithm:        "hmac_sha1_96"            # hmac_sha1_96 | hmac_sha256_128 …
+    pfs_group:             2                         # 0 = PFS disabled
+    lifetime:              3600                      # seconds
+    # NAT/BINAT: translate the local host IP to the pfSense Elastic IP
+    # before the packet enters the tunnel so Twilio sees a public routable source.
+    local_host_ip:         "LAN_IP_OF_HOST"          # e.g. 172.31.254.20
+    nat_binat_ip:          "PFSENSE_ELASTIC_IP"      # ipsec_encryption_domain_ip registered with Twilio
+
+  # ── Prefixes reachable via VPN ─────────────────────────────────────────────
+  # Add new entries here as Twilio expands its service addresses.
+  # All other traffic continues via the default WAN internet route.
+  vpn_prefixes:
+    - network:      "TWILIO_SERVICE_SUBNET"          # CIDR block provided by Twilio
+      description:  "Twilio us1-dev services"
+    # - network:    "ANOTHER_SUBNET"
+    #   description: "Twilio stage services"         # uncomment when needed

@@ -1,4 +1,31 @@
 ---
+# ── Bootstrap play: install Python3 on pfSense via raw SSH (no Python needed) ──
+# pfsensible.core modules require Python on the pfSense host.
+# pfSense Plus does not ship with Python, so we install it first using pkg.
+- name: Bootstrap Python3 on pfSense
+  hosts: pfsense
+  gather_facts: false
+
+  tasks:
+    - name: Wait for pfSense SSH to be reachable
+      ansible.builtin.wait_for:
+        host:    "{{ ansible_host }}"
+        port:    22
+        timeout: 120
+      delegate_to: localhost
+
+    - name: Install Python3 on pfSense (required by pfsensible.core)
+      ansible.builtin.raw: pkg install -y python311
+      check_mode: false   # must run even in --check mode; pkg is idempotent
+      changed_when: false
+
+    - name: Create /usr/local/bin/python3 symlink
+      ansible.builtin.raw: |
+        [ -f /usr/local/bin/python3 ] || ln -s /usr/local/bin/python3.11 /usr/local/bin/python3
+      check_mode: false
+      changed_when: false
+
+# ── Main play: configure pfSense via pfsensible.core ─────────────────────────
 - name: Configure pfSense Firewall
   hosts: pfsense
   gather_facts: false
@@ -6,19 +33,26 @@
   collections:
     - pfsensible.core
 
+  vars_files:
+    - ../../config.yaml       # admin_ip and network settings
+    - ../../vpn_config.yaml   # Non-sensitive VPN parameters
+    - ../../secrets.yaml      # PSK and cloud credentials (never commit)
+
   tasks:
     # ── 1. Validate connectivity ───────────────────────────────────────────────
-    - name: Wait for pfSense SSH to be reachable
-      ansible.builtin.wait_for_connection:
-        timeout: 120
+    # Python3 was installed in the bootstrap play above.
+    # Use raw so this works regardless of Python availability.
+    - name: Verify pfSense SSH connection
+      ansible.builtin.raw: echo ok
+      changed_when: false
 
     # ── 2. Aliases ────────────────────────────────────────────────────────────
     - name: Create admin host alias
       pfsense_alias:
         name: admin_host
         type: host
-        address: "{{ pfsense_host }}"
-        descr: "Terraform admin IP"
+        address: "{{ admin_ip | regex_replace('/.*', '') }}"  # strip /32 CIDR suffix
+        descr: "Admin management IP"
         state: present
 
     # ── 3. Firewall rules ─────────────────────────────────────────────────────
@@ -28,7 +62,9 @@
         action: pass
         interface: "{{ wan_interface }}"
         protocol: udp
-        destination_port: 500
+        source: any
+        destination: any
+        destination_port: "500"
         state: present
 
     - name: Allow IPsec NAT-T (UDP 4500) on WAN
@@ -37,7 +73,9 @@
         action: pass
         interface: "{{ wan_interface }}"
         protocol: udp
-        destination_port: 4500
+        source: any
+        destination: any
+        destination_port: "4500"
         state: present
 
     - name: Allow SSH from admin host only
@@ -47,7 +85,19 @@
         interface: "{{ wan_interface }}"
         protocol: tcp
         source: admin_host
-        destination_port: 22
+        destination: any
+        destination_port: "22"
+        state: present
+
+    - name: Allow HTTPS (webConfigurator) from admin host only
+      pfsense_rule:
+        name: "Allow HTTPS admin"
+        action: pass
+        interface: "{{ wan_interface }}"
+        protocol: tcp
+        source: admin_host
+        destination: any
+        destination_port: "443"
         state: present
 
     - name: Block all other WAN inbound traffic
@@ -56,10 +106,70 @@
         action: block
         interface: "{{ wan_interface }}"
         protocol: any
+        source: any
+        destination: any
         state: present
 
-    # ── 4. SSH hardening ─────────────────────────────────────────────────────
-    - name: Disable SSH password authentication
-      pfsense_setup:
-        sshd:
-          passwordauth: false
+    # ── 4. IPsec Phase 1 (IKE) ───────────────────────────────────────────────
+    # Parameters sourced from vpn_config.yaml → vpn.phase1
+    - name: Configure IPsec Phase 1 (IKE)
+      pfsense_ipsec:
+        descr:                  "{{ vpn_tunnel_description }}"
+        interface:              "{{ wan_interface }}"
+        remote_gateway:         "{{ vpn.phase1.gateway }}"
+        authentication_method:  "{{ vpn.phase1.auth_method }}"
+        preshared_key:          "{{ vpn_psk }}"
+        iketype:                "{{ vpn.phase1.ike_version }}"
+        mode:                   "{{ vpn.phase1.mode }}"
+        lifetime:               "{{ vpn.phase1.lifetime }}"
+        nat_traversal:          "{{ vpn.phase1.nat_traversal }}"
+        enable_dpd:             "{{ vpn.phase1.enable_dpd }}"
+        dpd_delay:              "{{ vpn.phase1.dpd_delay }}"
+        dpd_maxfail:            "{{ vpn.phase1.dpd_maxfail }}"
+        state: present
+
+    - name: Configure IPsec Phase 1 encryption proposal
+      pfsense_ipsec_proposal:
+        descr:      "{{ vpn_tunnel_description }}"
+        encryption: "{{ vpn.phase1.encryption_algorithm }}"
+        key_length: "{{ vpn.phase1.encryption_key_length }}"
+        hash:       "{{ vpn.phase1.auth_algorithm }}"
+        dhgroup:    "{{ vpn.phase1.dh_group }}"
+        state: present
+
+    # ── 5. IPsec Phase 2 (per VPN prefix) ────────────────────────────────────
+    # Loops over vpn.vpn_prefixes in vpn_config.yaml.
+    # Split routing: only prefixes listed here go through the VPN tunnel.
+    # All other traffic (e.g. 8.8.8.8) continues via the default WAN route.
+    # NAT/BINAT translates the Ubuntu host IP to the pfSense Elastic IP so
+    # Twilio sees a public routable source address inside the tunnel.
+    - name: "Configure IPsec Phase 2 for {{ item.description }}"
+      pfsense_ipsec_p2:
+        descr:    "{{ item.description }}"
+        p1_descr: "{{ vpn_tunnel_description }}"
+        mode:     tunnel
+        # Local selector: single host (/32) — Ubuntu LAN IP
+        local:    "{{ vpn.phase2.local_host_ip }}/32"
+        # NAT/BINAT: translate source to the pfSense Elastic IP
+        nat:      "{{ vpn.phase2.nat_binat_ip }}/32"
+        remote:   "{{ item.network }}"
+        protocol: esp
+        aes:      true
+        aes_len:  "{{ vpn.phase2.encryption_key_length }}"
+        sha1:     true
+        pfsgroup: "{{ vpn.phase2.pfs_group }}"
+        lifetime: "{{ vpn.phase2.lifetime }}"
+        state: present
+      loop: "{{ vpn.vpn_prefixes }}"
+
+    # ── 6. Firewall rules — IPsec interface ───────────────────────────────────
+    # Allow traffic arriving from the VPN tunnel toward the LAN.
+    - name: Allow all traffic on IPsec interface (enc0)
+      pfsense_rule:
+        name:        "Allow IPsec inbound"
+        action:      pass
+        interface:   enc0
+        protocol:    any
+        source:      any
+        destination: any
+        state:       present

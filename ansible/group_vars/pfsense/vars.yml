@@ -1,18 +1,24 @@
 ---
-# Connection settings
-ansible_user: admin
+# pfsensible.core modules connect to pfSense via SSH and modify
+# /cf/conf/config.xml directly. Python3 must be installed on pfSense first
+# (handled automatically by the bootstrap play in configure_pfsense.yml).
 ansible_connection: ssh
-ansible_python_interpreter: /usr/local/bin/python3
+ansible_user: admin
+ansible_python_interpreter: /usr/local/bin/python3.11
 
-# pfSense API / XMLRPC credentials
-pfsense_user: admin
+# pfSense host — set to the EIP from terraform output pfsense_public_ip
+pfsense_host: "YOUR_PFSENSE_PUBLIC_IP"
+
+# pfSense admin credentials (used by pfsensible.core modules)
+pfsense_user:     admin
 pfsense_password: "pfsense"  # Change after first login
 
-# pfSense host details
-pfsense_host: "YOUR_PFSENSE_PUBLIC_IP"  # Set to the EIP from terraform output pfsense_public_ip
+# Interfaces (pfSense logical names)
+wan_interface: wan
+lan_interface: lan
 
-# WAN interface
-wan_interface: em0
+# LAN subnet (used as IPsec local selector)
+lan_cidr: "172.31.254.0/24"
 
-# LAN CIDR (for future LAN interface if added)
-lan_cidr: "192.168.1.0/24"
+# IPsec tunnel description (referenced in phase1 + phase2 tasks)
+vpn_tunnel_description: "Twilio IPsec VPN"

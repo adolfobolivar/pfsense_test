@@ -1,13 +1,13 @@
 # pfSense Firewall on AWS
 
-Terraform project that deploys a **pfSense Plus firewall** on AWS with a dual-NIC (WAN + LAN) architecture. A private Ubuntu server sits behind the firewall on the LAN subnet, using pfSense as its default gateway. An Ansible playbook handles post-deploy pfSense configuration.
+Terraform project that deploys a **pfSense Plus firewall** on AWS with a dual-NIC (WAN + LAN) architecture. A private Ubuntu server sits behind the firewall on the LAN subnet, using pfSense as its default gateway. An Ansible playbook handles post-deploy pfSense configuration, including a **split-tunnel IPsec VPN to Twilio** with NAT/BINAT.
 
 ---
 
 ## Architecture
 
 ```
-Internet
+Internet / Twilio IPsec VPN
    │
    ▼
 [IGW]
@@ -37,6 +37,13 @@ Internet
 ```
 
 ### Routing
+
+Split-tunnel routing is enforced by pfSense:
+
+| Traffic destination | Path |
+|---|---|
+| VPN prefixes (defined in `vpn_config.yaml`) | IPsec tunnel → Twilio |
+| Everything else (e.g. `8.8.8.8`) | WAN → Internet |
 
 | Route Table | Subnet | Route | Target |
 |---|---|---|---|
@@ -69,7 +76,9 @@ Internet
 .
 ├── config.yaml.example      # Committed template – copy to config.yaml and fill in your values
 ├── config.yaml              # Your local config (gitignored – contains your public IP)
-├── secrets.yaml             # AWS credentials – never commit this file
+├── vpn_config.yaml.example  # Committed template – copy to vpn_config.yaml and fill in your values
+├── vpn_config.yaml          # VPN parameters (gitignored – contains Twilio peer IPs)
+├── secrets.yaml             # AWS credentials + VPN PSK – never commit this file
 ├── main.tf                  # All AWS resources
 ├── variables.tf             # Input variables
 ├── locals.tf                # Locals (config + secrets file decoding)
@@ -81,7 +90,7 @@ Internet
     ├── requirements.yml     # Ansible Galaxy collections
     ├── group_vars/
     │   └── pfsense/
-    │       └── vars.yml     # pfSense connection + interface variables
+    │       └── vars.yml     # pfSense connection, interface, and tunnel variables
     └── playbooks/
         └── configure_pfsense.yml
 ```
@@ -123,7 +132,35 @@ Create this file locally — **do not commit it**.
 ```yaml
 aws_access_key: "AKIAIOSFODNN7EXAMPLE"
 aws_secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+
+# IPsec VPN preshared key — provided by Twilio
+vpn_psk: "YOUR_PRESHARED_KEY"
 ```
+
+### `vpn_config.yaml`
+
+Contains Twilio peer IPs, VPN parameters, and VPN-reachable prefixes. This file is gitignored.
+Copy the example and fill in the values provided by Twilio:
+
+```bash
+cp vpn_config.yaml.example vpn_config.yaml
+```
+
+| Key | Description |
+|---|---|
+| `vpn.phase1.gateway` | Twilio IPsec peer public IP |
+| `vpn.phase1.ike_version` | `ikev1` or `ikev2` |
+| `vpn.phase1.encryption_algorithm` | e.g. `aes128`, `aes256` |
+| `vpn.phase1.auth_algorithm` | e.g. `sha1`, `sha256` |
+| `vpn.phase1.dh_group` | DH group number (e.g. `2`) |
+| `vpn.phase1.lifetime` | Phase 1 lifetime in seconds |
+| `vpn.phase2.encryption_algorithm` | e.g. `aes128` |
+| `vpn.phase2.auth_algorithm` | e.g. `hmac_sha1_96`, `hmac_sha256_128` |
+| `vpn.phase2.pfs_group` | PFS group (`0` to disable) |
+| `vpn.phase2.lifetime` | Phase 2 lifetime in seconds |
+| `vpn.phase2.local_host_ip` | LAN IP of the host that will use the VPN (e.g. `172.31.254.20`) |
+| `vpn.phase2.nat_binat_ip` | pfSense Elastic IP — `ipsec_encryption_domain_ip` registered with Twilio |
+| `vpn.vpn_prefixes` | List of subnets reachable via the VPN tunnel. Add new entries here as Twilio adds service addresses — no playbook changes needed. |
 
 ---
 
@@ -236,10 +273,35 @@ This reads the `pfsense_public_ip` Terraform output and writes `ansible/inventor
 
 ### 7. Install Ansible collections
 
+From the `ansible/` directory:
+
 ```bash
 cd ansible
 ansible-galaxy collection install -r requirements.yml
 ```
+
+Expected output:
+```
+Starting galaxy collection install process
+Process install dependency map
+Starting collection install process
+Downloading https://galaxy.ansible.com/api/v3/plugin/ansible/content/published/collections/artifacts/pfsensible-core-0.7.1.tar.gz ...
+Installing 'pfsensible.core:0.7.1' to '.../ansible/collections/ansible_collections/pfsensible/core'
+pfsensible.core:0.7.1 was installed successfully
+```
+
+Verify the collection is available:
+
+```bash
+ansible-galaxy collection list | grep pfsensible
+```
+
+Expected output:
+```
+pfsensible.core    0.7.1
+```
+
+If you see `[WARNING]: Error loading plugin 'pfsense_alias': No module named 'ansible_collections.pfsensible'` when running the playbook, it means the collection was not installed — re-run the `ansible-galaxy` command above from inside the `ansible/` directory (where `ansible.cfg` sets `collections_path = ./collections`).
 
 ### 8. Run the Ansible playbook
 
@@ -247,11 +309,102 @@ ansible-galaxy collection install -r requirements.yml
 ansible-playbook playbooks/configure_pfsense.yml
 ```
 
-The playbook:
-- Waits for pfSense SSH to become reachable
-- Creates a host alias for the admin IP
-- Adds WAN firewall rules (allow IPsec IKE/NAT-T and SSH from admin, block everything else)
-- Disables SSH password authentication
+The playbook runs two plays:
+
+**Bootstrap play** — installs Python3 on pfSense (required by `pfsensible.core`, runs once):
+1. Waits for pfSense SSH to be reachable
+2. Installs `python311` via `pkg` (idempotent — safe to re-run)
+3. Creates `/usr/local/bin/python3 → python3.11` symlink
+
+**Main play** — configures pfSense:
+1. Verifies SSH connection
+2. Creates `admin_host` alias pointing to your `admin_ip`
+3. Adds WAN firewall rules: allow IPsec IKE (UDP/500), NAT-T (UDP/4500), SSH and HTTPS from admin IP only; block all other inbound
+4. Configures **IPsec Phase 1** (IKE) — gateway, PSK, IKE version, lifetime, NAT-T, DPD
+5. Configures **IPsec Phase 1 encryption proposal** — AES-128, SHA1, DH group 2
+6. Configures **IPsec Phase 2** — one SA per entry in `vpn.vpn_prefixes` with NAT/BINAT translating the Ubuntu host IP to the pfSense Elastic IP
+7. Adds a firewall rule allowing inbound traffic on the IPsec interface (`enc0`)
+
+Expected output:
+```
+PLAY [Bootstrap Python3 on pfSense] ****************************************************
+
+TASK [Wait for pfSense SSH to be reachable] ********************************************
+ok: [pfsense-fw -> localhost]
+
+TASK [Install Python3 on pfSense (required by pfsensible.core)] ************************
+ok: [pfsense-fw]
+
+TASK [Create /usr/local/bin/python3 symlink] *******************************************
+ok: [pfsense-fw]
+
+PLAY [Configure pfSense Firewall] ******************************************************
+
+TASK [Verify pfSense SSH connection] ***************************************************
+ok: [pfsense-fw]
+
+TASK [Create admin host alias] *********************************************************
+changed: [pfsense-fw]
+
+TASK [Allow IPsec IKE (UDP 500) on WAN] ************************************************
+changed: [pfsense-fw]
+
+TASK [Allow IPsec NAT-T (UDP 4500) on WAN] *********************************************
+changed: [pfsense-fw]
+
+TASK [Allow SSH from admin host only] **************************************************
+changed: [pfsense-fw]
+
+TASK [Allow HTTPS (webConfigurator) from admin host only] ******************************
+changed: [pfsense-fw]
+
+TASK [Block all other WAN inbound traffic] *********************************************
+changed: [pfsense-fw]
+
+TASK [Configure IPsec Phase 1 (IKE)] ***************************************************
+changed: [pfsense-fw]
+
+TASK [Configure IPsec Phase 1 encryption proposal] *************************************
+changed: [pfsense-fw]
+
+TASK [Configure IPsec Phase 2 for Twilio us1-dev services] *****************************
+changed: [pfsense-fw]
+
+TASK [Allow all traffic on IPsec interface (enc0)] *************************************
+changed: [pfsense-fw]
+
+PLAY RECAP *****************************************************************************
+pfsense-fw : ok=14   changed=10   unreachable=0   failed=0   skipped=0   rescued=0   ignored=0
+```
+
+> **Note:** The warning `'item' is undefined` on the Phase 2 task name is cosmetic — Ansible evaluates the task name before the loop starts. The task runs correctly as confirmed by `changed: [pfsense-fw] => (item={...})`.
+
+On subsequent runs (after first-time setup), most tasks will show `ok` instead of `changed` — that means pfSense is already in the desired state and nothing was modified.
+
+### 9. Verify the VPN tunnel
+
+SSH into pfSense and open a shell (option 8):
+
+```bash
+ssh -i ./pfsense-key.pem admin@<EIP>
+# Select option 8 for shell
+ipsec statusall
+```
+
+Look for `ESTABLISHED` and `INSTALLED` in the output. Then test split routing from Ubuntu:
+
+```bash
+ssh -i ./pfsense-key.pem \
+  -o "ProxyCommand ssh -i ./pfsense-key.pem admin@<EIP> -W %h:%p" \
+  ubuntu@172.31.254.20
+
+# Should route via VPN tunnel:
+ping -c 3 <TWILIO_SERVICE_IP>
+
+# Should still route via internet:
+ping -c 3 8.8.8.8
+curl -s https://checkip.amazonaws.com   # must return the pfSense EIP
+```
 
 ---
 
@@ -292,3 +445,11 @@ terraform destroy
 - The Ubuntu instance has **no public IP** and is not reachable from the internet directly.
 - Update `admin_ip` in `config.yaml` to your actual public IP before deploying to avoid locking yourself out.
 - The default pfSense admin password (`pfsense`) must be changed immediately after first login — see step 4 above.
+- **Split-tunnel VPN:** Only prefixes listed under `vpn.vpn_prefixes` in `vpn_config.yaml` are routed through the IPsec tunnel. All other traffic (including `8.8.8.8`) exits via the WAN internet route. To add future Twilio service subnets, append entries to `vpn_prefixes` and re-run the Ansible playbook — no Terraform changes needed.
+- **NAT/BINAT:** The Ansible playbook configures pfSense to translate the Ubuntu host's LAN IP to the pfSense Elastic IP (`nat_binat_ip`) before packets enter the tunnel. This is required because Twilio only accepts traffic from the registered `ipsec_encryption_domain_ip`.
+- **Host key warning after instance rebuild:** Destroying and re-creating instances generates new SSH host keys. If you see `WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED`, remove the stale entries and reconnect:
+  ```bash
+  ssh-keygen -R <PFSENSE_EIP>
+  ssh-keygen -R 172.31.254.20
+  ```
+- **Sensitive files — never commit:** `secrets.yaml` (AWS credentials + VPN PSK) and `vpn_config.yaml` (Twilio peer IPs) are gitignored. Use their `.example` counterparts as templates.
